@@ -1,5 +1,8 @@
 import gradio as gr
 from huggingface_hub import InferenceClient
+import os
+openweather_key = os.environ['OPENWEATHER_API_KEY']
+trefle_token = os.environ['TREFLE_TOKEN']
 
 
 def respond(
@@ -68,3 +71,4 @@ with gr.Blocks() as demo:
 
 if __name__ == "__main__":
     demo.launch()
+
