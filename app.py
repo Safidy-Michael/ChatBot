@@ -34,92 +34,31 @@ def ow_current(city: str):
         r.raise_for_status()
         return r.json(), None
     except Exception as e:
-        return None, f"Impossible de récupérer la météo : {e}"
+        return None, f"Erreur météo actuelle : {e}"
 
-def ow_forecast_5d(city: str):
+def ow_forecast(city: str):
     url = "https://api.openweathermap.org/data/2.5/forecast"
-    params = {"q": city.strip(), "appid": OPENWEATHER_API_KEY, "units": "metric", "lang": "fr"}
+    params = {"q": city.strip(), "appid": OPENWEATHER_API_KEY, "units": "metric", "lang": "fr", "cnt": 40}
     try:
         r = requests.get(url, params=params, timeout=8)
         r.raise_for_status()
-        return r.json(), None
-    except Exception as e:
-        return None, f"Impossible de récupérer la prévision 5 jours : {e}"
-
-def summarize_forecast(forecast_json):
-    summary = []
-    for item in forecast_json.get("list", []):
-        ts = item["dt"]
-        date = dt.datetime.fromtimestamp(ts).strftime("%d/%m %H:%M")
-        desc = item["weather"][0]["description"].capitalize()
-        temp = item["main"]["temp"]
-        summary.append(f"{date}: {desc}, Temp: {temp}°C")
-    return summary[:10]
-
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Assistant Agricole Madagascar</title>
-<style>
-body { font-family: 'Segoe UI', sans-serif; background: #f9f6f2; margin:0; padding:0; }
-.container { max-width: 900px; margin: 20px auto; background: #fff; padding: 25px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-h1 { text-align:center; color: #2e7d32; margin-bottom:20px; }
-.weather, .forecast, .bot-response { padding:15px; border-radius:12px; margin-bottom:15px; background:#f0f0f0; }
-form { display:flex; flex-direction:column; margin-top:10px; }
-input[type=text], select { width:100%; padding:12px; border-radius:8px; border:1px solid #ccc; margin-bottom:10px; font-size:16px; }
-button { background:#2e7d32; color:white; border:none; padding:12px; border-radius:8px; cursor:pointer; font-size:16px; }
-button:hover { background:#1b5e20; }
-@media (max-width:600px) {
-    .container { padding:15px; }
-    input[type=text], select, button { font-size:14px; }
-}
-</style>
-</head>
-<body>
-<div class="container">
-<h1>🌱 Assistant Agricole Madagascar</h1>
-
-{% if weather %}
-<div class="weather">
-<h3>🌦️ Météo actuelle à {{ city }}</h3>
-<p>{{ weather }}</p>
-</div>
-{% endif %}
-
-{% if forecast %}
-<div class="forecast">
-<h3>📅 Prévision 5 jours</h3>
-<ul>
-{% for f in forecast %}
-<li>{{ f }}</li>
-{% endfor %}
-</ul>
-</div>
-{% endif %}
-
-{% if bot_reply %}
-<div class="bot-response">
-<h3>🤖 Réponse du bot :</h3>
-<p>{{ bot_reply|safe }}</p>
-</div>
-{% endif %}
-
-<form method="POST">
-<select name="lang">
-<option value="fr" {% if lang=='fr' %}selected{% endif %}>Français</option>
-<option value="mg" {% if lang=='mg' %}selected{% endif %}>Malagasy</option>
-</select>
-<input type="text" name="message" placeholder="{% if lang=='mg' %}Ohatra: Ahoana ny fambolena karaoty?{% else %}Ex: Comment planter des carottes ?{% endif %}" required>
-<button type="submit">{% if lang=='mg' %}Alefa{% else %}Envoyer{% endif %}</button>
-</form>
-
-</div>
-</body>
-</html>
-"""
+        data = r.json()
+        forecast_list = []
+        added_days = set()
+        for item in data["list"]:
+            day = item["dt_txt"].split(" ")[0]
+            if day not in added_days:
+                added_days.add(day)
+                desc = item["weather"][0]["description"].capitalize()
+                temp = round(item["main"]["temp"])
+                humidity = item["main"]["humidity"]
+                wind = round(item["wind"]["speed"],1)
+                forecast_list.append(f"📅 {day} : {desc}, {temp}°C, humidité {humidity}%, vent {wind} m/s")
+            if len(forecast_list) >= 5:
+                break
+        return forecast_list
+    except:
+        return ["Prévision indisponible"]
 
 def ask_openai_hf(prompt):
     try:
@@ -131,38 +70,76 @@ def ask_openai_hf(prompt):
     except Exception as e:
         return f"Erreur lors de l'appel au modèle : {e}"
 
-@app.route("/", methods=["GET","POST"])
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Assistant Agricole Madagascar</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; background: #e8f5e9; padding: 10px; }
+        .container { max-width: 800px; margin: auto; background: #ffffff; padding: 20px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);}
+        input, button { padding: 12px; margin: 10px 0; width: 100%; border-radius: 8px; border: 1px solid #ccc; }
+        button { background: #4caf50; color: white; font-weight: bold; cursor: pointer; }
+        button:hover { background: #388e3c; }
+        .weather, .forecast, .chat { margin-top: 20px; padding: 15px; border-radius: 10px; line-height: 1.6; }
+        .weather { background: #fffde7; }
+        .forecast { background: #e1f5fe; }
+        .chat { background: #f1f8e9; }
+        .question { font-weight: bold; margin-top: 10px; }
+        .response { margin-top: 10px; white-space: pre-wrap; }
+        h1 { text-align: center; color: #2e7d32; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌱 Assistant Agricole Madagascar</h1>
+        <div class="weather">
+            <h3>🌦️ Météo actuelle à {{ city }}</h3>
+            <p>{{ weather }}</p>
+        </div>
+        <div class="forecast">
+            <h3>📅 Prévision météo 5 jours</h3>
+            {% for f in forecast %}
+                <p>{{ f }}</p>
+            {% endfor %}
+        </div>
+        <div class="chat">
+            <div class="question">📝 Ta question :</div>
+            <div>{{ question }}</div>
+            <div class="response">🤖 Réponse du bot :<br>{{ reply }}</div>
+        <form method="POST">
+            <input type="text" name="message" placeholder="Pose ta question ici...">
+            <button type="submit">Envoyer</button>
+        </form>
+        {% if question %}
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
+"""
+
+@app.route("/", methods=["GET", "POST"])
 def index():
     city = auto_detect_city()
     weather_data, err = ow_current(city)
-    forecast_data, _ = ow_forecast_5d(city)
-    forecast_summary = summarize_forecast(forecast_data) if forecast_data else []
+    if weather_data:
+        weather_info = f"{weather_data['weather'][0]['description'].capitalize()}, Temp: {weather_data['main']['temp']}°C, Humidité: {weather_data['main']['humidity']}%, Vent: {weather_data['wind']['speed']} m/s"
+    else:
+        weather_info = err
 
-    weather_info = f"{weather_data['weather'][0]['description'].capitalize()}, Temp: {weather_data['main']['temp']}°C, Humidité: {weather_data['main']['humidity']}%, Vent: {weather_data['wind']['speed']} m/s" if weather_data else err
-
-    lang = request.form.get("lang", "fr")
-    bot_reply = None
-
+    forecast = ow_forecast(city)
+    reply = ""
+    question = ""
     if request.method == "POST":
-        message = request.form.get("message")
-        if message:
-            prompt = (
-                f"Tu es un assistant agricole pour Madagascar, langue {lang}. "
-                f"Météo actuelle à {city}: {weather_info}. "
-                "Liste en points simples les cultures possibles aujourd'hui et explique clairement "
-                "les étapes: plantation, arrosage, fertilisation, récolte et vente. "
-                f"Question de l'utilisateur: {message}"
-            )
-            bot_reply = ask_openai_hf(prompt)
+        question = request.form.get("message")
+        if question:
+            prompt = f"Tu es un assistant agricole pour Madagascar. La météo actuelle à {city} est: {weather_info}. Donne uniquement une réponse claire pour la question suivante en **points**, avec des emojis, bien espacée, inclure plantation, arrosage, fertilisation, récolte, vente. Pas de tableaux, pas de #, pas de *, aérer le texte. Question: {question}"
+            reply = ask_openai_hf(prompt)
 
-    return render_template_string(
-        HTML_TEMPLATE,
-        city=city,
-        weather=weather_info,
-        forecast=forecast_summary,
-        bot_reply=bot_reply,
-        lang=lang
-    )
+    return render_template_string(HTML_TEMPLATE, city=city, weather=weather_info, forecast=forecast, reply=reply, question=question)
 
 if __name__ == "__main__":
     app.run(debug=True)
