@@ -3,7 +3,6 @@ from dotenv import load_dotenv
 from flask import Flask, request, render_template_string
 from openai import OpenAI
 import requests
-import datetime as dt
 
 load_dotenv()
 app = Flask(__name__)
@@ -14,6 +13,8 @@ client = OpenAI(
 )
 
 OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY")
+
+chat_history = []
 
 def auto_detect_city():
     try:
@@ -70,6 +71,11 @@ def ask_openai_hf(prompt):
     except Exception as e:
         return f"Erreur lors de l'appel au modèle : {e}"
 
+def translate_text(text, lang="fr"):
+    if lang == "mg":
+        return text.replace("Temp", "Mari-pana").replace("Humidité", "Hamandoana").replace("Vent", "Rivotra").replace("Météo actuelle", "Toetr'andro ankehitriny").replace("Prévision météo 5 jours", "Vinavina toetr'andro 5 andro")
+    return text
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -77,45 +83,42 @@ HTML_TEMPLATE = """
     <title>Assistant Agricole Madagascar</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body { font-family: Arial, sans-serif; background: #e8f5e9; padding: 10px; }
-        .container { max-width: 800px; margin: auto; background: #ffffff; padding: 20px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);}
-        input, button { padding: 12px; margin: 10px 0; width: 100%; border-radius: 8px; border: 1px solid #ccc; }
-        button { background: #4caf50; color: white; font-weight: bold; cursor: pointer; }
-        button:hover { background: #388e3c; }
-        .weather, .forecast, .chat { margin-top: 20px; padding: 15px; border-radius: 10px; line-height: 1.6; }
-        .weather { background: #fffde7; }
-        .forecast { background: #e1f5fe; }
-        .chat { background: #f1f8e9; }
-        .question { font-weight: bold; margin-top: 10px; }
-        .response { margin-top: 10px; white-space: pre-wrap; }
-        h1 { text-align: center; color: #2e7d32; }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='improved_styles.css') }}">
 </head>
 <body>
-    <div class="container">
-        <h1>🌱 Assistant Agricole Madagascar</h1>
-        <div class="weather">
-            <h3>🌦️ Météo actuelle à {{ city }}</h3>
-            <p>{{ weather }}</p>
+    <div class="header">
+        <div>
+            <h1>🌱 Assistant Agricole Madagascar</h1>
+            <div class="weather">{{ weather }}</div>
         </div>
+        <form method="POST" style="display:inline;">
+            <input type="hidden" name="lang_toggle" value="{{ toggle_lang }}">
+            <button class="lang-btn" type="submit">{{ toggle_lang.upper() }}</button>
+        </form>
+    </div>
+
+    <div class="container">
         <div class="forecast">
-            <h3>📅 Prévision météo 5 jours</h3>
+            <h3>{{ forecast_title }}</h3>
             {% for f in forecast %}
                 <p>{{ f }}</p>
             {% endfor %}
         </div>
+
         <div class="chat">
-            <div class="question">📝 Ta question :</div>
-            <div>{{ question }}</div>
-            <div class="response">🤖 Réponse du bot :<br>{{ reply }}</div>
-        <form method="POST">
-            <input type="text" name="message" placeholder="Pose ta question ici...">
-            <button type="submit">Envoyer</button>
-        </form>
-        {% if question %}
+            {% for chat in chat_history %}
+                <div class="question">📝 {{ chat.question }}</div>
+                <div class="response">🤖 {{ chat.reply }}</div>
+                <hr>
+            {% endfor %}
         </div>
-        {% endif %}
+
+        <div class="input-container">
+            <form method="POST">
+                <input type="text" name="message" placeholder="Posez votre question agricole ici..." required>
+                <button type="submit">Envoyer</button>
+            </form>
+        </div>
     </div>
 </body>
 </html>
@@ -131,15 +134,28 @@ def index():
         weather_info = err
 
     forecast = ow_forecast(city)
-    reply = ""
-    question = ""
+
+    # Gestion langue
+    lang = request.form.get("lang_toggle", "fr")
+    toggle_lang = "mg" if lang == "fr" else "fr"
+    weather_info_trans = translate_text(weather_info, lang)
+    forecast_title = translate_text("Prévision météo 5 jours", lang)
+
     if request.method == "POST":
         question = request.form.get("message")
         if question:
-            prompt = f"Tu es un assistant agricole pour Madagascar. La météo actuelle à {city} est: {weather_info}. Donne uniquement une réponse claire pour la question suivante en **points**, avec des emojis, bien espacée, inclure plantation, arrosage, fertilisation, récolte, vente. Pas de tableaux, pas de #, pas de *, aérer le texte. Question: {question}"
+            prompt = f"Tu es un assistant agricole pour Madagascar. La météo actuelle à {city} est: {weather_info_trans}. Donne uniquement une réponse claire pour la question suivante en points avec emojis, bien espacée, inclure plantation, arrosage, fertilisation, récolte, vente. Pas de tableaux, pas de #, pas de *, aérer le texte. Question: {question}"
             reply = ask_openai_hf(prompt)
+            chat_history.append({"question": question, "reply": reply})
 
-    return render_template_string(HTML_TEMPLATE, city=city, weather=weather_info, forecast=forecast, reply=reply, question=question)
+    return render_template_string(
+        HTML_TEMPLATE,
+        weather=weather_info_trans,
+        forecast=forecast,
+        chat_history=chat_history,
+        forecast_title=forecast_title,
+        toggle_lang=toggle_lang
+    )
 
 if __name__ == "__main__":
     app.run(debug=True)
