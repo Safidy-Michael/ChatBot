@@ -16,6 +16,9 @@ OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY")
 
 chat_history = []
 
+# ------------------------------
+# Fonctions météo
+# ------------------------------
 def auto_detect_city():
     try:
         r = requests.get("http://ip-api.com/json", timeout=5)
@@ -61,6 +64,9 @@ def ow_forecast(city: str):
     except:
         return ["Prévision indisponible"]
 
+# ------------------------------
+# OpenAI
+# ------------------------------
 def ask_openai_hf(prompt):
     try:
         completion = client.chat.completions.create(
@@ -71,11 +77,16 @@ def ask_openai_hf(prompt):
     except Exception as e:
         return f"Erreur lors de l'appel au modèle : {e}"
 
-def translate_text(text, lang="fr"):
+def translate_text_full(text, lang="fr"):
+    """Traduction complète FR ↔ MG via OpenAI"""
     if lang == "mg":
-        return text.replace("Temp", "Mari-pana").replace("Humidité", "Hamandoana").replace("Vent", "Rivotra").replace("Météo actuelle", "Toetr'andro ankehitriny").replace("Prévision météo 5 jours", "Vinavina toetr'andro 5 andro")
+        prompt = f"Traduis le texte suivant en malgache de manière naturelle, en gardant les emojis et la mise en page:\n{text}"
+        return ask_openai_hf(prompt)
     return text
 
+# ------------------------------
+# Template HTML
+# ------------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -124,6 +135,9 @@ HTML_TEMPLATE = """
 </html>
 """
 
+# ------------------------------
+# Route principale
+# ------------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
     city = auto_detect_city()
@@ -138,14 +152,28 @@ def index():
     # Gestion langue
     lang = request.form.get("lang_toggle", "fr")
     toggle_lang = "mg" if lang == "fr" else "fr"
-    weather_info_trans = translate_text(weather_info, lang)
-    forecast_title = translate_text("Prévision météo 5 jours", lang)
+    weather_info_trans = translate_text_full(weather_info, lang)
+    forecast_title = translate_text_full("Prévision météo 5 jours", lang)
 
     if request.method == "POST":
         question = request.form.get("message")
         if question:
-            prompt = f"Tu es un assistant agricole pour Madagascar. La météo actuelle à {city} est: {weather_info_trans}. Donne uniquement une réponse claire pour la question suivante en points avec emojis, bien espacée, inclure plantation, arrosage, fertilisation, récolte, vente. Pas de tableaux, pas de #, pas de *, aérer le texte. Question: {question}"
+            prompt = f"""
+Tu es un assistant agricole spécialisé pour Madagascar. 
+La météo actuelle à {city} est : {weather_info_trans}.  
+
+Règles de réponse :
+- Réponds uniquement à la question suivante de manière claire et simple.  
+- Utilise des points avec des emojis 🌱💧🌾💰🚜.  
+- Aère bien le texte (sauts de ligne entre chaque point).  
+- Inclure si possible : plantation, arrosage, fertilisation, récolte et vente.  
+- Propose une culture rare ou peu cultivée et explique comment réussir malgré le climat actuel, en proposant des protections ou irrigation si nécessaire.  
+- Ne fais pas de tableau, ne mets pas de # ou de *.
+
+Question : {question}
+"""
             reply = ask_openai_hf(prompt)
+            reply = translate_text_full(reply, lang)
             chat_history.append({"question": question, "reply": reply})
 
     return render_template_string(
